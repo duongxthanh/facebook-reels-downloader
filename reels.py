@@ -1,6 +1,7 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from time import sleep
+import os
 import subprocess
 import csv
 import sys
@@ -44,19 +45,19 @@ for _ in range(scroll_steps):
 
     prev_scroll_position = curr_scroll_position
 
-# Extract reel urls
+# Extract reel URLs
 a_elements = driver.find_elements(By.CSS_SELECTOR, 'a')
 
-# Create a chanel output dir
-args = ["mkdir", "-p", f"output/{chanel}"]
-subprocess.run(args)
+# Create a chanel output directory (cross-platform)
+os.makedirs(f"output/{chanel}", exist_ok=True)
 
+# Save the extracted URLs to a CSV file
 with open(f"output/{chanel}.csv", "w") as f:
-  writer = csv.writer(f)
-  for element in a_elements:
-      href = element.get_attribute('href')
-      if href and '/reel/' in href:
-          writer.writerow([href.split('/?s=')[0]])
+    writer = csv.writer(f)
+    for element in a_elements:
+        href = element.get_attribute('href')
+        if href and '/reel/' in href:
+            writer.writerow([href.split('/?s=')[0]])
 
 f.close()
 driver.quit()
