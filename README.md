@@ -10,20 +10,20 @@ All the videos will be in MPEG-4 Part 14 (MP4 😉) format.
 
 ![fb_v](demo.gif)
 
-## Git Installation
+## Clone & Configure
 ```
 # clone the repo
-$ git clone git@github.com:duongxthanh/facebook-reels-downloader.git
+$ git clone https://github.com/duongxthanh/facebook-reels-downloader.git
 
 # change the working directory to facebook-reels-downloader
 $ cd facebook-reels-downloader
 
 # install the requirements
-$ pip3 install -r requirements.txt
+$ pip install -r requirements.txt
 ```
 ## Usage
 ```
-python3 reels.py <channel_name> <channel_reel_url>
+python reels.py <channel_name> <channel_reel_url>
 ```
 
 ## For your Attention

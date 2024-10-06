@@ -1,12 +1,14 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from time import sleep
+import os
 import subprocess
 import csv
 import sys
 
 # Initialize the WebDriver
-driver = webdriver.Chrome()
+# Ensure the chromedriver is in the system path or provide the absolute path
+driver = webdriver.Chrome()  # Update if needed, e.g., webdriver.Chrome(executable_path='/path/to/chromedriver')
 driver.maximize_window()
 
 # Open the webpage
@@ -44,25 +46,27 @@ for _ in range(scroll_steps):
 
     prev_scroll_position = curr_scroll_position
 
-# Extract reel urls
+# Extract reel URLs
 a_elements = driver.find_elements(By.CSS_SELECTOR, 'a')
 
-# Create a chanel output dir
-args = ["mkdir", "-p", f"output/{chanel}"]
-subprocess.run(args)
+# Create a chanel output directory (cross-platform)
+output_dir = os.path.join("output", chanel)
+os.makedirs(output_dir, exist_ok=True)
 
-with open(f"output/{chanel}.csv", "w") as f:
-  writer = csv.writer(f)
-  for element in a_elements:
-      href = element.get_attribute('href')
-      if href and '/reel/' in href:
-          writer.writerow([href.split('/?s=')[0]])
+# Save the extracted URLs to a CSV file
+csv_path = os.path.join("output", f"{chanel}.csv")
+with open(csv_path, "w") as f:
+    writer = csv.writer(f)
+    for element in a_elements:
+        href = element.get_attribute('href')
+        if href and '/reel/' in href:
+            writer.writerow([href.split('/?s=')[0]])
 
 f.close()
 driver.quit()
 
 # Bulk download reels with yt-dlp
-args = ["yt-dlp", "-f", "best", "-a", f"output/{chanel}.csv", "--output", f"output/{chanel}/%(id)s.%(ext)s"]
+args = ["yt-dlp", "-f", "best", "-a", csv_path, "--output", os.path.join(output_dir, "%(id)s.%(ext)s")]
 process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 for line in iter(lambda: process.stdout.readline(), b''):
     print(line.decode("utf-8"))
