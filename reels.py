@@ -3,10 +3,14 @@ facebook-reels-downloader
 Download all reels from a Facebook channel/page with a single command.
 
 Usage:
-    python reels.py <channel_name> <channel_reel_url>
+    python reels.py <channel_name> "<channel_reel_url>"
     python reels.py <channel_name> --from-csv output/<channel_name>.csv
+    python reels.py                 # interactive, paste the URL when asked
 
 Notes:
+- ALWAYS wrap the URL in quotes. Facebook profile links contain "&", which every
+  shell treats as an operator (PowerShell refuses to run, cmd.exe and bash cut
+  the URL in half). Quotes make the shell hand the whole URL to Python.
 - Facebook only shows a few reels to logged-out users. The script opens Chrome
   and pauses so you can log in manually, then it scrolls and collects every reel.
 - Selenium 4.6+ auto-manages chromedriver (Selenium Manager); no manual download.
@@ -16,6 +20,102 @@ import os
 import subprocess
 import sys
 from time import sleep
+from urllib.parse import parse_qsl, urlparse, urlunparse
+
+# Hosts we accept as a Facebook channel. Anything else is almost certainly a typo.
+FACEBOOK_HOSTS = ("facebook.com", "fb.com")
+
+# Path segments that already point at reels, so we must not rewrite the URL.
+REELS_SEGMENTS = {"reel", "reels", "videos"}
+
+USAGE = """Usage:
+  python reels.py <channel_name> "<channel_reel_url>"
+  python reels.py <channel_name> --from-csv <path_to_csv>
+  python reels.py                          (interactive - just paste the URL)
+
+Keep the URL inside quotes. Facebook URLs contain "&", and an unquoted "&" is
+consumed by the shell before Python ever sees it:
+  PowerShell : "The ampersand (&) character is not allowed"
+  cmd.exe    : the URL is silently cut at the "&"
+  bash/zsh   : the URL is cut and the command is put in the background
+
+Examples:
+  python reels.py jireel "https://www.facebook.com/profile.php?id=61554746552594&sk=reels_tab"
+  python reels.py jireel "https://www.facebook.com/jireel/reels"
+"""
+
+TRUNCATED_URL_WARNING = """
+WARNING: the URL you passed ends right after the profile id, which is what a
+shell leaves behind when it eats an unquoted "&" (the "&sk=reels_tab" part is
+missing). Continuing with the reels tab added back automatically.
+
+Next time, put the URL in quotes:
+  python reels.py <channel_name> "<url>"
+"""
+
+
+def _clean_url(url):
+    """Strip whitespace and any quote characters the shell left in the string."""
+    # Users paste URLs still wrapped in the quotes they typed, and cmd.exe users
+    # are told to escape as ...id=1"&"sk=... - both leave stray quotes in argv.
+    # A quote is never valid in an un-encoded URL, so dropping all of them is safe.
+    return url.strip().replace('"', "").replace("'", "").strip()
+
+
+def normalize_channel_url(url):
+    """Return a URL pointing at the channel's reels tab.
+
+    Repairs the two things that go wrong in practice: stray quotes from shell
+    escaping, and a profile URL whose "&sk=reels_tab" was eaten by the shell.
+    Raises ValueError if the string is not a Facebook URL.
+    """
+    url = _clean_url(url)
+    if not url:
+        raise ValueError("No URL given.")
+    if "://" not in url:
+        url = "https://" + url
+
+    parts = urlparse(url)
+    host = parts.netloc.lower().split(":")[0]
+    if not any(host == h or host.endswith("." + h) for h in FACEBOOK_HOSTS):
+        raise ValueError(f"Not a Facebook URL: {url}")
+
+    path, query = parts.path, parts.query
+    segments = [s for s in path.split("/") if s]
+    lowered = {s.lower() for s in segments}
+
+    # Already a reels URL, or the user picked a tab on purpose - leave it alone.
+    if lowered & REELS_SEGMENTS or "sk" in {k.lower() for k, _ in parse_qsl(query)}:
+        return urlunparse(parts)
+
+    if segments and segments[0].lower() in ("profile.php", "people"):
+        # Profile-style URL: the reels tab is a query parameter.
+        query = f"{query}&sk=reels_tab" if query else "sk=reels_tab"
+    elif len(segments) == 1:
+        # Vanity page like /jireel: the reels tab is a path.
+        path = f"/{segments[0]}/reels"
+
+    return urlunparse((parts.scheme, parts.netloc, path, parts.params, query, parts.fragment))
+
+
+def looks_shell_truncated(url):
+    """True if the URL looks like a profile link that lost its "&..." to the shell."""
+    url = _clean_url(url)
+    if "://" not in url:
+        url = "https://" + url
+    parts = urlparse(url)
+    if not parts.query:
+        return False
+    keys = [k.lower() for k, _ in parse_qsl(parts.query)]
+    return parts.path.lower().endswith("/profile.php") and keys == ["id"]
+
+
+def _prompt(label):
+    """Read one line from the user. Nothing here goes through a shell."""
+    try:
+        return input(label).strip()
+    except EOFError:
+        return ""
 
 
 def download_from_csv(channel, csv_path):
@@ -90,6 +190,10 @@ def scrape_reel_urls(channel, url):
             seen.add(href.split("/?s=")[0])
     driver.quit()
 
+    if not seen:
+        print("No reels found on that page. Check that the URL opens the Reels")
+        print("tab of the channel and that you were logged in before pressing Enter.")
+
     os.makedirs("output", exist_ok=True)
     csv_path = os.path.join("output", f"{channel}.csv")
     with open(csv_path, "w", newline="") as f:
@@ -101,28 +205,51 @@ def scrape_reel_urls(channel, url):
 
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage:")
-        print("  python reels.py <channel_name> <channel_reel_url>")
-        print("  python reels.py <channel_name> --from-csv <path_to_csv>")
-        sys.exit(1)
+    args = sys.argv[1:]
 
-    channel = sys.argv[1]
+    if args and args[0] in ("-h", "--help"):
+        print(USAGE)
+        return 0
 
-    if sys.argv[2] == "--from-csv":
-        if len(sys.argv) < 4:
+    # Re-download mode: python reels.py <channel> --from-csv <path>
+    if len(args) >= 2 and args[1] == "--from-csv":
+        if len(args) < 3:
             print("Please provide the CSV path: python reels.py <channel> --from-csv <path>")
-            sys.exit(1)
-        csv_path = sys.argv[3]
+            return 1
+        csv_path = _clean_url(args[2])
         if not os.path.isfile(csv_path):
             print(f"CSV not found: {csv_path}")
-            sys.exit(1)
-    else:
-        url = sys.argv[2]
-        csv_path = scrape_reel_urls(channel, url)
+            return 1
+        return download_from_csv(args[0], csv_path)
 
-    download_from_csv(channel, csv_path)
+    if len(args) >= 2:
+        channel, raw_url = args[0], args[1]
+        if looks_shell_truncated(raw_url):
+            print(TRUNCATED_URL_WARNING)
+    else:
+        # Interactive mode. What you paste here never passes through the shell,
+        # so "&" and every other special character arrive intact.
+        print(USAGE)
+        print("Nothing to do yet - let's fill it in (paste is safe here).\n")
+        channel = args[0] if args else _prompt("Channel name (output folder): ")
+        raw_url = _prompt("Channel reels URL: ")
+        if not channel or not raw_url:
+            print("\nA channel name and a URL are both required.")
+            return 1
+
+    try:
+        url = normalize_channel_url(raw_url)
+    except ValueError as exc:
+        print(f"Error: {exc}\n")
+        print(USAGE)
+        return 1
+
+    if url != _clean_url(raw_url):
+        print(f"Using URL: {url}")
+
+    csv_path = scrape_reel_urls(channel, url)
+    return download_from_csv(channel, csv_path)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

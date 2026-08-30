@@ -27,11 +27,37 @@ $ python -m pip install -r requirements.txt
 ## Usage
 ```
 # 1) Collect reels from a channel and download them
-python reels.py <channel_name> <channel_reel_url>
+#    ALWAYS put the URL in quotes (Facebook URLs contain "&").
+python reels.py <channel_name> "<channel_reel_url>"
 
 # 2) Re-download later from the saved list (skips scraping)
 python reels.py <channel_name> --from-csv output/<channel_name>.csv
+
+# 3) No arguments: the script asks for the name and the URL.
+#    Pasting at the prompt is always safe - the shell never sees it.
+python reels.py
 ```
+
+### Quote the URL
+A Facebook channel link usually looks like
+`https://www.facebook.com/profile.php?id=61554746552594&sk=reels_tab`. The `&` is
+a **shell operator**, so an unquoted URL never reaches the script:
+
+| Shell | What happens without quotes |
+|---|---|
+| PowerShell | refuses to run: *"The ampersand (&) character is not allowed"* |
+| cmd.exe | silently cuts the URL at the `&` and tries to run the rest as a command |
+| bash / zsh | cuts the URL and puts the command in the background |
+
+Quotes fix all three:
+```
+python reels.py jireel "https://www.facebook.com/profile.php?id=61554746552594&sk=reels_tab"
+python reels.py jireel "https://www.facebook.com/jireel/reels"
+```
+If a cut-off URL still gets through, the script now detects it, warns you, and
+puts the reels tab back before scraping.
+
+### What happens when it runs
 A Chrome window opens on the channel page. **Log in to Facebook in that window**
 so you can see *all* reels (logged-out users only see the first page), then press
 Enter in the terminal to start collecting. The login is remembered for next time.
@@ -52,9 +78,22 @@ Reel URLs are saved to `output/<channel_name>.csv` and the videos to
 - **It freezes during download** — fixed. `yt-dlp` output no longer fills a pipe
   that was never read. Pull the latest version. Broken/removed reels are now
   skipped automatically (`-i`).
+- **`The ampersand (&) character is not allowed`** (PowerShell), or the URL gets
+  cut at the `&` (cmd.exe, bash) — the URL was not quoted. Use
+  `python reels.py <channel> "<url>"`, or run `python reels.py` with no arguments
+  and paste the URL at the prompt.
+- **`... is not recognized as the name of a cmdlet`** — the `python reels.py <channel>`
+  part is missing from the command; you ran the bare URL.
+- **`Not a Facebook URL`** — the argument order is `<channel_name>` first, then the URL.
 
 ## For your Attention
 If you are downloading copyrighted content you should respect author's rights and use the content either for personal purposes or for non-commercial needs with proper mention and authorisation from the author.
+
+## Tests
+```
+python -m unittest discover -s tests -v
+```
+No extra dependencies; the URL handling is covered by plain `unittest`.
 
 ## Support & Contributions
 - Please ⭐️ this repository if this project helped you!
