@@ -36,6 +36,12 @@ python reels.py <channel_name> --from-csv output/<channel_name>.csv
 # 3) No arguments: the script asks for the name and the URL.
 #    Pasting at the prompt is always safe - the shell never sees it.
 python reels.py
+
+# Add --dated-filenames to any of the above to name files
+# "DDMMYYYY_<channel_name>_<id>.<ext>" instead of "<id>.<ext>" - handy for
+# sorting reels from many channels by upload date and site once collected
+# together.
+python reels.py jireel "https://www.facebook.com/jireel/reels" --dated-filenames
 ```
 
 ### Quote the URL

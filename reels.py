@@ -7,6 +7,11 @@ Usage:
     python reels.py <channel_name> --from-csv output/<channel_name>.csv
     python reels.py                 # interactive, paste the URL when asked
 
+Add --dated-filenames to any of the above to name each downloaded file
+"DDMMYYYY_<channel_name>_<id>.<ext>" instead of just "<id>.<ext>", which makes
+files from many channels sortable by upload date and site once collected
+together.
+
 Notes:
 - ALWAYS wrap the URL in quotes. Facebook profile links contain "&", which every
   shell treats as an operator (PowerShell refuses to run, cmd.exe and bash cut
@@ -33,6 +38,10 @@ USAGE = """Usage:
   python reels.py <channel_name> --from-csv <path_to_csv>
   python reels.py                          (interactive - just paste the URL)
 
+Add --dated-filenames to name files "DDMMYYYY_<channel_name>_<id>.<ext>"
+instead of just "<id>.<ext>" - useful for sorting reels from many channels
+by upload date and site once they are collected in one place.
+
 Keep the URL inside quotes. Facebook URLs contain "&", and an unquoted "&" is
 consumed by the shell before Python ever sees it:
   PowerShell : "The ampersand (&) character is not allowed"
@@ -42,7 +51,11 @@ consumed by the shell before Python ever sees it:
 Examples:
   python reels.py jireel "https://www.facebook.com/profile.php?id=61554746552594&sk=reels_tab"
   python reels.py jireel "https://www.facebook.com/jireel/reels"
+  python reels.py jireel "https://www.facebook.com/jireel/reels" --dated-filenames
 """
+
+# Flag: name downloaded files "DDMMYYYY_<channel>_<id>.<ext>" instead of "<id>.<ext>".
+DATED_FILENAMES_FLAG = "--dated-filenames"
 
 TRUNCATED_URL_WARNING = """
 WARNING: the URL you passed ends right after the profile id, which is what a
@@ -118,7 +131,24 @@ def _prompt(label):
         return ""
 
 
-def download_from_csv(channel, csv_path):
+def build_filename_template(channel, dated=False):
+    """Return the yt-dlp filename template (just the file part, no directory).
+
+    dated=True names files "DDMMYYYY_<channel>_<id>.<ext>" so reels from many
+    channels can be sorted by upload date and site once collected together.
+    Falls back to "NA" for the date if yt-dlp/Facebook has no upload date for
+    a given reel, so a missing field can never crash the download.
+    """
+    if not dated:
+        return "%(id)s.%(ext)s"
+    # "%" is a template escape character in yt-dlp output templates, so a
+    # channel name containing one (e.g. "100% Real Page") must be doubled up
+    # or it would corrupt the template instead of appearing literally.
+    safe_channel = channel.replace("%", "%%")
+    return f"%(upload_date>%d%m%Y|NA)s_{safe_channel}_%(id)s.%(ext)s"
+
+
+def download_from_csv(channel, csv_path, dated=False):
     """Download every reel URL listed in csv_path with yt-dlp."""
     output_dir = os.path.join("output", channel)
     os.makedirs(output_dir, exist_ok=True)
@@ -131,7 +161,7 @@ def download_from_csv(channel, csv_path):
         "-f", "best",
         "-i",                       # skip broken/removed reels and keep going
         "-a", csv_path,             # batch file of URLs
-        "--output", os.path.join(output_dir, "%(id)s.%(ext)s"),
+        "--output", os.path.join(output_dir, build_filename_template(channel, dated)),
     ]
     # Merge stderr into stdout so a full stderr pipe can never deadlock (freeze).
     process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -211,6 +241,11 @@ def main():
         print(USAGE)
         return 0
 
+    # --dated-filenames can appear anywhere; pull it out before the rest of the
+    # positional-argument parsing below, which doesn't need to know about it.
+    dated = DATED_FILENAMES_FLAG in args
+    args = [a for a in args if a != DATED_FILENAMES_FLAG]
+
     # Re-download mode: python reels.py <channel> --from-csv <path>
     if len(args) >= 2 and args[1] == "--from-csv":
         if len(args) < 3:
@@ -220,7 +255,7 @@ def main():
         if not os.path.isfile(csv_path):
             print(f"CSV not found: {csv_path}")
             return 1
-        return download_from_csv(args[0], csv_path)
+        return download_from_csv(args[0], csv_path, dated=dated)
 
     if len(args) >= 2:
         channel, raw_url = args[0], args[1]
@@ -248,7 +283,7 @@ def main():
         print(f"Using URL: {url}")
 
     csv_path = scrape_reel_urls(channel, url)
-    return download_from_csv(channel, csv_path)
+    return download_from_csv(channel, csv_path, dated=dated)
 
 
 if __name__ == "__main__":
